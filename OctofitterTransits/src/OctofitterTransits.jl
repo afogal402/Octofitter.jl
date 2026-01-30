@@ -2,6 +2,7 @@ module OctofitterTransits
 using Transits
 using TypedTables
 using Octofitter
+using StaticArrays
 
 const light_curve_cols = (:epoch, :phot, :σ_phot)
 
@@ -13,12 +14,19 @@ Tranits.jl and a table of observations.
 """
 struct LightCurveObs{TLimbDark, TTable<:Table} <: Octofitter.AbstractObs
     table::TTable
-    function LightCurveObs(ld::Type{<:AbstractLimbDark}, observations...)
-        table = Table(observations...)
-        if !issubset(light_curve_cols, Tables.columnnames(table))
-            error("Ecpected columns $light_curve_cols")
+    priors::Octofitter.Priors
+    derived::Octofitter.Derived
+    name::String
+    function LightCurveObs(ld::Type{<:AbstractLimbDark}, observations;
+            variables::Tuple{Octofitter.Priors,Octofitter.Derived}=(@variables begin;end),
+            name
+        )
+        (priors,derived)=variables
+        table = Table(observations)
+        if !issubset(light_curve_cols, TypedTables.columnnames(table))
+            error("Expected columns $light_curve_cols")
         end
-        return new{ld, typeof(table)}(table)
+        return new{ld, typeof(table)}(table, priors, derived, name)
     end
 end
 LightCurveObs(observations::NamedTuple...) = LightCurveObs(observations)
@@ -34,7 +42,7 @@ limbdarkfunc(lightcurve::LightCurveObs{limbdark}) where limbdark = limbdark
 """
 Transit likelihood. Uses Transits.jl QuadLimbDark.
 """
-function ln_like(lc::LightCurveObs, ctx::Octofitter.SystemObservationContext)
+function Octofitter.ln_like(lc::LightCurveObs, ctx::Octofitter.SystemObservationContext)
     (; θ_system, orbits) = ctx
     T = Float64
     ll = zero(T)
@@ -89,10 +97,11 @@ function transit_depth(orbit, t,  r, Rₛₜₐᵣ, ld=QuadLimbDark(Float64[]))
 
     
     # TODO: at the moment this only supports Visual{KepOrbit}
-    cosi = orbit.cosi
+    # cosi = orbit.cosi
 
 
-    T = promote_type(typeof(t), typeof(r), typeof(cosi))
+    # T = promote_type(typeof(t), typeof(r), typeof(cosi))
+    T = promote_type(typeof(t), typeof(r))
 
     # From Transits.jl.
     # Ensure we are in front of the star.
@@ -100,7 +109,8 @@ function transit_depth(orbit, t,  r, Rₛₜₐᵣ, ld=QuadLimbDark(Float64[]))
         # one(T)
     # else
         # bₜᵣₐₙ = sqrt(x^2 + z^2)/Rₛₜₐᵣ
-        bₜᵣₐₙ = sqrt(z^2 + y^2)/Rₛₜₐᵣ
+        Rₛₜₐᵣm = Rₛₜₐᵣ * 6.957e8  # convert solar radii to metres
+        bₜᵣₐₙ = sqrt(z^2 + y^2)/Rₛₜₐᵣm
         convert(T, Transits.compute(ld, bₜᵣₐₙ, r))
     # end
 
